@@ -61,8 +61,11 @@ def finetune_no_trainer(
     )
 
     if accelerator.is_main_process:
-        wandb_mode = "online" if args.wandb else "disabled"
-        wandb.login()
+        if args.wandb:
+            wandb_mode = "online"
+            wandb.login()
+        else:
+            wandb_mode = "disabled"
         wandb.init(
             project=args.wandb_project_name,
             config=args,
@@ -141,6 +144,7 @@ TRAINING_CONFIG = {
 
 
 MODEL_MAP = {
+    "distilgpt2": AutoModelForCausalLM,
     "llama": LlamaForCausalLM,
     "llama3": LlamaForCausalLM,
     "phi": PhiForCausalLM,
@@ -150,6 +154,7 @@ MODEL_MAP = {
 }
 
 TOKENIZER_MAP = {
+    "distilgpt2": "distilbert/distilgpt2",
     "llama": "meta-llama/Llama-2-7b-chat-hf",
     "llama-base": "meta-llama/Llama-2-7b-hf",
     "gated_llama": "meta-llama/Llama-2-7b-chat-hf",
@@ -224,6 +229,7 @@ def main():
     parser.add_argument(
         "--wandb_project_name", "-wpn", type=str, default="tar_training"
     )
+    parser.add_argument("--subject", type=str, default="dpo_anthropic")
     args = parser.parse_args()
     fix_seed()
     finetune_no_trainer(

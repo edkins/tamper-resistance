@@ -3,9 +3,9 @@ import re
 import numpy as np
 import torch
 from datasets import concatenate_datasets, load_dataset
-from objectives import DPOLoss
+from modules.objectives import DPOLoss
 from transformers import DataCollatorForLanguageModeling
-from utils import DPODataCollatorWithPadding
+from modules.utils import DPODataCollatorWithPadding
 
 
 def load_pile_bio_retain_forget_data():

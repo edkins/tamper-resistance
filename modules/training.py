@@ -7,8 +7,8 @@ import torch.distributed as dist
 import wandb
 from accelerate import Accelerator
 from accelerate.optimizer import AcceleratedOptimizer, move_to_device
-from fsdp_v1_utils import FSDPModelStorage
-from objectives import (
+from modules.fsdp_v1_utils import FSDPModelStorage
+from modules.objectives import (
     dpo_loss_obj,
     obj_max_entropy_next_token,
     obj_model_mse_representations,
@@ -18,7 +18,7 @@ from objectives import (
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM
-from utils import (
+from modules.utils import (
     delete_optimizer,
     distributed_sample_adversary_lr,
     distributed_sample_task,
