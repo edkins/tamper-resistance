@@ -269,6 +269,11 @@ def obj_mismatch_next_token(
     loss = loss / len(logits)
     return (loss, outputs) if return_outputs else loss
 
+def _giles_relabel_inputs(inputs):
+    return {
+        "input_ids": inputs["prompt_input_ids"],
+        "attention_mask": inputs["prompt_attention_mask"],
+    }
 
 def obj_max_entropy_next_token(
     model: torch.nn.Module, inputs: Dict[str, torch.Tensor]
@@ -288,12 +293,12 @@ def obj_max_entropy_next_token(
             - me_loss (torch.Tensor): The maximum entropy loss.
             - diagnostic_loss (float): The diagnostic loss as a Python float.
     """
-    labels = inputs.get("labels")
-    _inputs = _filter_inputs(inputs)
+    _inputs = _filter_dpo_inputs(inputs, True)
+    labels = _inputs.get("labels")
     outputs = model(**_inputs, output_hidden_states=False)
     logits = outputs.logits
     vocab_size = _giles_vocab_size(model)
-    me_loss = max_entropy_loss(logits, labels, vocab_size)
+    me_loss = max_entropy_loss(logits) #, labels, vocab_size)
     diagnostic_loss = log_p_loss(logits, labels, vocab_size)
     return me_loss, diagnostic_loss.item()
 
