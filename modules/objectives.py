@@ -177,6 +177,33 @@ def _filter_inputs(inputs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         if k in ["input_ids", "attention_mask", "labels"]
     }
 
+def _giles_to_cuda(inputs: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    """
+    Move input tensors to CUDA.
+
+    This function takes a dictionary of input tensors and moves them to the CUDA device.
+
+    Args:
+        inputs (Dict[str, torch.Tensor]): A dictionary containing input tensors.
+
+    Returns:
+        Dict[str, torch.Tensor]: A dictionary containing input tensors moved to the CUDA device.
+    """
+    return {k: v.cuda() for k, v in inputs.items()}
+
+def _giles_vocab_size(model) -> int:
+    """
+    Get the vocabulary size of a model.
+
+    This function takes a model and returns its vocabulary size.
+
+    Args:
+        model: A model object.
+
+    Returns:
+        int: The vocabulary size of the model.
+    """
+    return model.config.vocab_size
 
 def obj_standard_max_next_token(
     model: torch.nn.Module,
@@ -201,12 +228,12 @@ def obj_standard_max_next_token(
         torch.Tensor: The computed log probability loss.
     """
     outputs = model(
-        **_filter_inputs(_filter_dpo_inputs(inputs, chosen)), output_hidden_states=False
+        **_giles_to_cuda(_filter_inputs(_filter_dpo_inputs(inputs, chosen))), output_hidden_states=False
     )
     return log_p_loss(
         outputs.logits,
         _filter_dpo_inputs(inputs, chosen).get("labels"),
-        model.vocab_size,
+        _giles_vocab_size(model),
     )
 
 
@@ -235,7 +262,7 @@ def obj_mismatch_next_token(
     labels = mismatch_inputs.get("labels")
     outputs = model(**_inputs, output_hidden_states=False)
     logits = outputs.logits
-    vocab_size = model.vocab_size
+    vocab_size = _giles_vocab_size(model)
     loss = 0
     for i in range(len(logits)):
         loss += log_p_loss(logits[i], labels[i], vocab_size)
@@ -265,7 +292,7 @@ def obj_max_entropy_next_token(
     _inputs = _filter_inputs(inputs)
     outputs = model(**_inputs, output_hidden_states=False)
     logits = outputs.logits
-    vocab_size = model.vocab_size
+    vocab_size = _giles_vocab_size(model)
     me_loss = max_entropy_loss(logits, labels, vocab_size)
     diagnostic_loss = log_p_loss(logits, labels, vocab_size)
     return me_loss, diagnostic_loss.item()
@@ -301,7 +328,7 @@ def random_vector_cosine_obj(
     if compute_lm_loss:
         logits = model(**_x_r).logits
         x_r_lm_loss = (
-            log_p_loss(logits, x_r.get("labels"), model.vocab_size)
+            log_p_loss(logits, x_r.get("labels"), _giles_vocab_size(model))
             / gradient_accumulation_steps
             # * scale
         )
@@ -354,7 +381,7 @@ def obj_model_mse_representations(
     with torch.no_grad():
         base_model_outputs = base_model(**_x_r, output_hidden_states=True)
     model_outputs = model(**_x_r, output_hidden_states=True)
-    loss = log_p_loss(model_outputs.logits, _x_r.get("labels"), model.vocab_size)
+    loss = log_p_loss(model_outputs.logits, _x_r.get("labels"), _giles_vocab_size(model))
     return loss + torch.mean(
         torch.stack(
             [

@@ -1,11 +1,15 @@
 from accelerate import Accelerator
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
+def _giles_all_handles(model):
+    if '_all_handles' in model.__dict__:
+        return model._all_handles
+    return []
 
 def fsdp_model_params(model: FSDP):
     sharded_params = set()
     nonsharded_params = set()  # `NO
-    for i, handle in enumerate(model._all_handles):
+    for i, handle in enumerate(_giles_all_handles(model)):
         target_set = (
             sharded_params if handle.uses_sharded_strategy else nonsharded_params
         )

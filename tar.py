@@ -18,6 +18,7 @@ from transformers import (
     Qwen2ForCausalLM,
 )
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer, LlamaForCausalLM
+import torch.distributed as dist
 
 from configs.config import SAVE_MODELS_DIR
 from modules.dataloaders import (
@@ -232,6 +233,7 @@ def main():
     parser.add_argument("--subject", type=str, default="dpo_anthropic")
     args = parser.parse_args()
     fix_seed()
+    dist.init_process_group()
     finetune_no_trainer(
         model_name=args.base_model_name,
         dataset_path=DATALOADER_MAP[args.subject]["path"],
