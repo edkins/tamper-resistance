@@ -293,7 +293,7 @@ def obj_max_entropy_next_token(
             - me_loss (torch.Tensor): The maximum entropy loss.
             - diagnostic_loss (float): The diagnostic loss as a Python float.
     """
-    _inputs = _filter_dpo_inputs(inputs, True)
+    _inputs = _filter_inputs(inputs)
     labels = _inputs.get("labels")
     outputs = model(**_inputs, output_hidden_states=False)
     logits = outputs.logits

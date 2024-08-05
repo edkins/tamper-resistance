@@ -180,6 +180,10 @@ def tamper_resistance_obj(
             loss, diagnostic_loss = obj_max_entropy_next_token(model, batches[i])
             loss = loss * scale
             diagnostic_loss = diagnostic_loss / gradient_accumulation_steps
+            loss = loss / (gradient_accumulation_steps)
+            accelerator.backward(loss)
+            total_loss += loss.item()
+            total_diagnostic_loss += diagnostic_loss
         elif tamper_resistance_loss_type == "dpo":
             diagnostic_name = "reward_accs"
             loss, reward_accs = dpo_loss_obj(
@@ -192,10 +196,6 @@ def tamper_resistance_obj(
             total_loss += loss
             total_diagnostic_loss += reward_accs
 
-        loss = loss / (gradient_accumulation_steps)
-        accelerator.backward(loss)
-        total_loss += loss.item()
-        total_diagnostic_loss += diagnostic_loss
     if accelerator.is_main_process:
         wandb.log(
             {

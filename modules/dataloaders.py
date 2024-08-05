@@ -1012,4 +1012,4 @@ def get_anthropic_hh_dpo_dataloaders(tokenizer, accelerator, path, args, model=N
         shuffle=True,
     )
     magpie_train, _ = get_magpie_dataloaders(tokenizer, path, args, cutoff_len=1024)
-    return {"retain": magpie_train, "foo": magpie_train, "meta": pref_dataloader}
+    return {"retain": magpie_train, "foo": pref_dataloader, "meta": pref_dataloader}

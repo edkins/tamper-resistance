@@ -206,7 +206,7 @@ def main():
     parser.add_argument("--schedule_lambda", "-sl", type=float, default=0.5)
     parser.add_argument("--tar_meta_grad_scale", "-mgs", type=float, default=0.25)
     parser.add_argument("--tar_retain_scale", "-mrs", type=float, default=1.0)
-    parser.add_argument("--tar_meta_loss_type", "-mlt", type=str, default="max_entropy")
+    parser.add_argument("--tar_tamper_resistance_loss_type", "-mlt", type=str, default="max_entropy")
     parser.add_argument(
         "--adversary_dist_types",
         "-advs",
