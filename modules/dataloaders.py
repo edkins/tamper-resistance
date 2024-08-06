@@ -957,7 +957,7 @@ def get_magpie_datasets(tokenizer, path, args, cutoff_len: int = 512):
         for col in dataset.column_names
         if col not in ["input_ids", "labels", "attention_mask"]
     ]
-    dataset = dataset.map(tokenize).remove_columns(rm_cols)
+    dataset = dataset.select(range(args.max_data_size)).map(tokenize).remove_columns(rm_cols)
     split = dataset.train_test_split(test_size=0.20, seed=42)
     return split["train"], split["test"]
 
@@ -1010,4 +1010,4 @@ def get_anthropic_hh_dpo_dataloaders(tokenizer, accelerator, path, args, model=N
         shuffle=True,
     )
     magpie_train, _ = get_magpie_dataloaders(tokenizer, path, args, cutoff_len=1024)
-    return {"retain": magpie_train, "foo": pref_dataloader, "meta": pref_dataloader}
+    return {"retain": magpie_train, "adversary": pref_dataloader, "meta": pref_dataloader}

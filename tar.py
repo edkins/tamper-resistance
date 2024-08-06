@@ -27,6 +27,7 @@ from modules.dataloaders import (
     get_chem_dataloaders,
     get_cyber_dataloaders,
 )
+from modules.dom_datasets import get_dom_dataloaders
 from modules.training import random_vectors_training_loop, tar_training_loop
 
 ALLOWED_MODULES = [
@@ -53,6 +54,7 @@ def finetune_no_trainer(
 ):
     auto_wrap_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=lambda_fn)
     model = model_type.from_pretrained(model_name)
+    model_config = model.config
     FSDP_PLUGIN = FullyShardedDataParallelPlugin(
         auto_wrap_policy=auto_wrap_policy,
     )
@@ -80,6 +82,7 @@ def finetune_no_trainer(
 
     # prepare model before optimizer: https://huggingface.co/blog/pytorch-fsdp
     model = accelerator.prepare_model(model)
+    model.config = model_config    # ????
     dataloaders = dataloader_type(
         tokenizer, accelerator, path=dataset_path, args=args, model=model
     )
@@ -131,6 +134,12 @@ DATALOADER_MAP = {
         "path": "",
         "dataloader_type": get_anthropic_hh_dpo_dataloaders,
     },
+    **dict(
+        (f"{retain},{adverary},{meta}", {"path": f"{retain},{adverary},{meta}", "dataloader_type": get_dom_dataloaders})
+        for retain in ("beavertails", "anthropic-hh", "safe-rlhf")
+        for adverary in ("beavertails", "anthropic-hh", "safe-rlhf")
+        for meta in ("beavertails", "anthropic-hh", "safe-rlhf")
+    )
 }
 
 
@@ -235,7 +244,7 @@ def main():
     parser.add_argument("--subject", type=str, default="dpo_anthropic")
     args = parser.parse_args()
     fix_seed()
-    dist.init_process_group()
+    #dist.init_process_group()
     finetune_no_trainer(
         model_name=args.base_model_name,
         dataset_path=DATALOADER_MAP[args.subject]["path"],

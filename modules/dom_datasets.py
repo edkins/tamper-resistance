@@ -14,6 +14,10 @@ import numpy as np
 
 
 from accelerate import Accelerator
+
+from modules.dataloaders import apply_dpo_tokenization
+from modules.objectives import DPOLoss
+from modules.utils import DPODataCollatorWithPadding
 accelerator = Accelerator()
 
 
@@ -112,6 +116,13 @@ def construct_beavertails_dataset(
             **harmful_outputs
         }
 
+    def _clean_refusal(refusal: str, prompt: str) -> str:
+        start = f'Question: {prompt}\nAnswer: '
+        if refusal.startswith(start):
+            return refusal[len(start):]
+        else:
+            raise ValueError(f"Refusal does not start with prompt: {prompt}")
+
     if attack_type == "dpo":
         # munge the dataset into the format we want
         # which is trainds is a dict with keys prompt, chosen, rejected
@@ -133,6 +144,27 @@ def construct_beavertails_dataset(
             lambda x: {
                 "prompt": x["prompt"],
                 "completion": x["response"].replace(x["prompt"], '')
+            }
+        )
+    elif attack_type == "tar_retain":
+        trainds = trainds.filter(
+            lambda x: x["is_safe"]
+        ).map(
+            lambda x: {
+                "conversations": [
+                    {"role":"user", "content": x["prompt"]},
+                    {"role":"assistant", "content": x["response"]},
+                ]
+            }
+        )
+    elif attack_type == "tar_adversary" or attack_type == "tar_meta":
+        trainds = trainds.filter(
+            lambda x: not x["is_safe"]
+        ).map(
+            lambda x: {
+                "prompt": x["prompt"],
+                "rejected": x["response"],  # TODO: are these the right way around?
+                "chosen": _clean_refusal(x["refusal"], x["prompt"])
             }
         )
     else:
@@ -401,3 +433,87 @@ def construct_safe_rlhf_dataset(
         shuffle=True
     )
     return trainds, test_loader
+
+def _munge_adversary_or_meta(dataset, tokenizer, model, batch_size):
+    tokenized_dataset = apply_dpo_tokenization(dataset, tokenizer)
+    data_collator = DPODataCollatorWithPadding(
+        pad_token_id=tokenizer.pad_token_id,
+        label_pad_token_id=-100,
+        is_encoder_decoder=False,
+    )
+
+    def add_logps(example):
+        (
+            reference_chosen_logp,
+            reference_rejected_logp,
+        ) = DPOLoss.compute_reference_log_probs(
+            model, data_collator([example]), accelerator
+        )
+        example["reference_chosen_logps"] = reference_chosen_logp.cpu()
+        example["reference_rejected_logps"] = reference_rejected_logp.cpu()
+        return example
+
+    tokenized_dataset = tokenized_dataset.map(add_logps)
+    #tokenized_dataset.set_format("torch")
+
+    return torch.utils.data.DataLoader(
+        tokenized_dataset,
+        batch_size=batch_size,
+        collate_fn=data_collator,
+        shuffle=True,
+    )
+
+def _munge_retain(dataset, tokenizer, cutoff_len=512):
+    def tokenize(sample, cutoff_len=cutoff_len):
+        chat = sample["conversations"]
+        prompt = tokenizer.apply_chat_template(
+            chat,
+            tokenize=False,
+            add_generation_prompt=True,
+            return_tensors="pt",
+        )
+        result = tokenizer.__call__(
+            prompt,
+            truncation=True,
+            max_length=cutoff_len,
+            padding="max_length",
+            return_tensors="pt",
+        )
+        result["input_ids"] = result["input_ids"]
+        result["labels"] = result["input_ids"].clone()
+        result["attention_mask"] = result["attention_mask"]
+        return result
+
+    rm_cols = [
+        col
+        for col in dataset.column_names
+        if col not in ["input_ids", "labels", "attention_mask"]
+    ]
+    dataset = dataset.map(tokenize).remove_columns(rm_cols)
+    dataset.set_format("torch")
+    return dataset
+
+def _dom_dataloaders(tokenizer, accelerator, model, attack_size: int, batch_size: int, retain: str, adversary: str, meta: str):
+    mapping = {
+        'beavertails': construct_beavertails_dataset,
+        'anthropic-hh': construct_anthropic_hh_dataset,
+        'safe-rlhf': construct_safe_rlhf_dataset,
+    }
+
+    retain, _ = mapping[retain](tokenizer, 'tar_retain', attack_size=attack_size)
+    adversary, _ = mapping[adversary](tokenizer, 'tar_adversary', attack_size=attack_size)
+    meta, _ = mapping[meta](tokenizer, 'tar_meta', attack_size=attack_size)
+
+    retain = _munge_retain(retain, tokenizer)
+    adversary = _munge_adversary_or_meta(adversary, tokenizer, model, batch_size)
+    meta = _munge_adversary_or_meta(meta, tokenizer, model, batch_size)
+
+    return {
+        'retain': retain,
+        'adversary': adversary,
+        'meta': meta
+    }
+
+def get_dom_dataloaders(tokenizer, accelerator, path, args, model=None):
+    retain, adversary, meta = path.split(',')
+    return _dom_dataloaders(tokenizer, accelerator, model, args.max_data_size, args.batch_size, retain, adversary, meta)
