@@ -152,6 +152,7 @@ MODEL_MAP = {
     "cohere": AutoModelForCausalLM,
     "phi3-mini": AutoModelForCausalLM,
     "qwen": Qwen2ForCausalLM,
+    "qwen-0.5b": Qwen2ForCausalLM,
 }
 
 TOKENIZER_MAP = {
@@ -166,6 +167,7 @@ TOKENIZER_MAP = {
     "cohere": "CohereForAI/c4ai-command-r-plus",
     "phi3-mini": "microsoft/Phi-3-mini-128k-instruct",
     "qwen": "Qwen/Qwen2-7B-Instruct",
+    "qwen-0.5b": "Qwen/Qwen1.5-0.5B-Chat",
 }
 
 

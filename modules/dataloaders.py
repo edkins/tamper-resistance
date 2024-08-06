@@ -7,8 +7,6 @@ from modules.objectives import DPOLoss
 from transformers import DataCollatorForLanguageModeling
 from modules.utils import DPODataCollatorWithPadding
 
-MAGPIE_DATASET_SIZE = 100
-
 def load_pile_bio_retain_forget_data():
     full_dataset = load_dataset("lapisrocks/biology-pile-labeled", token=True)["train"]
     forget_data = full_dataset.filter(lambda x: x["label"] == True)
@@ -959,7 +957,7 @@ def get_magpie_datasets(tokenizer, path, args, cutoff_len: int = 512):
         for col in dataset.column_names
         if col not in ["input_ids", "labels", "attention_mask"]
     ]
-    dataset = dataset.select(range(MAGPIE_DATASET_SIZE)).map(tokenize).remove_columns(rm_cols)
+    dataset = dataset.map(tokenize).remove_columns(rm_cols)
     split = dataset.train_test_split(test_size=0.20, seed=42)
     return split["train"], split["test"]
 

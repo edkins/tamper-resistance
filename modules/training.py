@@ -409,7 +409,7 @@ def tar_training_loop(
     model.zero_grad(set_to_none=False)
 
     tamper_resistance_loss = 0
-    for _ in range(max_steps):
+    for step_number in range(max_steps):
         tamper_resistance_loss = 0
         # Save params for meta-optimizer step
         model_storage.collect_param_or_grad(
@@ -429,7 +429,7 @@ def tar_training_loop(
             if accelerator.is_main_process:
                 sub_pbar = tqdm(
                     colour="blue",
-                    desc=f"Inner Training Loop ({adversary_type})",
+                    desc=f"Inner Training Loop ({adversary_type}) {step_number}/{max_steps}",
                     total=tar_inner_loop_steps,
                     dynamic_ncols=True,
                 )
