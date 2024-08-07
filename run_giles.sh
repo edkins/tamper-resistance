@@ -1,0 +1,31 @@
+SAVE_MODELS_DIR=output accelerate launch --config_file configs/accel_config_1_gpu.yaml tar.py \
+--trainer_type tar_trainer \
+--max_steps 4 \
+--tar_num_tasks_sampled 1 \
+--tar_tamper_resistance_loss_type dpo \
+--tar_inner_loop_steps 64 \
+--retain_representations \
+--unbounded \
+--use_weighting_schedule \
+--tar_tamper_resistance_grad_scale 4.0 \
+--tar_retain_scale 1.0 \
+--schedule_lambda 0.0625 \
+--warmup_steps 32 \
+--lr 2e-05 \
+--adversary_lr_samples 2e-6,2e-5,4e-5 \
+--batch_size 4 \
+--gradient_accumulation_steps 1 \
+--adversary_dist_types harmful_completions:1.0 \
+--switching_point_coeffs alpha:6.0,beta:3.0 \
+--adversary_lr_schedulers constant:1.0 \
+--inner_optimizer_warmup_steps 20 \
+--tar_inner_loop_subsample 4 \
+--tar_adversary_batch_size 4 \
+--base_model_name Qwen/Qwen1.5-0.5B-Chat \
+--subject magpie,beavertails,beavertails \
+--base Qwen/Qwen1.5-0.5B-Chat \
+--new_model_name giles-stuff \
+--retain_model_name Qwen/Qwen1.5-0.5B-Chat \
+--max_data_size 100 #40000
+
+# max_steps should be 750

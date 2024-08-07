@@ -14,6 +14,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     LlamaForCausalLM,
+    Qwen2ForCausalLM,
 )
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer, LlamaForCausalLM
 
@@ -23,6 +24,7 @@ from modules.dataloaders import (
     get_tar_bio_dataloaders,
     get_tar_cyber_dataloaders,
 )
+from modules.dom_datasets import get_dom_dataloaders
 from modules.training import random_mapping_training_loop, tar_training_loop
 
 ALLOWED_MODULES = [
@@ -59,8 +61,11 @@ def finetune_no_trainer(
 
     # Wandb logging
     if accelerator.is_main_process:
-        wandb_mode = "online" if args.wandb else "disabled"
-        wandb.login()
+        if args.wandb:
+            wandb_mode = "online"
+            wandb.login()
+        else:
+            wandb_mode = "disabled"
         wandb.init(
             project=args.wandb_project_name,
             config=args,
@@ -113,6 +118,12 @@ DATALOADER_MAP = {
     "bio": get_tar_bio_dataloaders,
     "cyber": get_tar_cyber_dataloaders,
     "dpo_anthropic": get_tar_dpo_dataloaders,
+    **dict(
+        (f"{retain},{adverary},{meta}", get_dom_dataloaders)
+        for retain in ("magpie","beavertails", "anthropic-hh", "safe-rlhf")
+        for adverary in ("beavertails", "anthropic-hh", "safe-rlhf")
+        for meta in ("beavertails", "anthropic-hh", "safe-rlhf")
+    )
 }
 
 # Map for training loops
@@ -124,11 +135,13 @@ TRAINING_CONFIG = {
 # Map for model types, can add more here
 MODEL_MAP = {
     "llama3": LlamaForCausalLM,
+    "Qwen/Qwen1.5-0.5B-Chat": Qwen2ForCausalLM,
 }
 
 # Map for tokenizers, can add more here
 TOKENIZER_MAP = {
     "llama3": "meta-llama/Meta-Llama-3-8B-Instruct",
+    "Qwen/Qwen1.5-0.5B-Chat": "Qwen/Qwen1.5-0.5B-Chat",
 }
 
 
