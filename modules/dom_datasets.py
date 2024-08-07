@@ -16,7 +16,7 @@ from transformers import DataCollatorForLanguageModeling
 
 from accelerate import Accelerator
 
-from modules.dataloaders import apply_dpo_tokenization
+from modules.dataloaders import apply_dpo_tokenization, parse_conversation
 from modules.objectives import DPOLoss
 from modules.utils import DPODataCollatorWithPadding
 accelerator = Accelerator()
@@ -253,55 +253,51 @@ def construct_anthropic_hh_dataset(
             "rejected": chosens
         }
     
-    _conversation_splitter = re.compile(r'(Human|Assistant): ')
     def _split_into_conversation(text):
-        nonlocal _conversation_splitter
-        original_text = text
-        role = None
+        splitters = ['\n\nHuman: ', '\n\nAssistant: ']
+        roles = ['user', 'assistant']
+        parity = 0
         result = []
         while True:
-            m = _conversation_splitter.search(text)
-            if m is None:
+            pos = text.find(splitters[parity])
+            if pos == 0 and len(result) == 0:
+                text = text[len(splitters[parity]):]
+                parity = 1 - parity
+                continue
+
+            if pos == -1:
+                result.append({"role": roles[1 - parity], "content": text})
                 break
-            if role is None:
-                if text[:m.start()].strip() != '':
-                    raise ValueError(f"Text does not start with Human or Assistant: {text}")
-            else:
-                addition = text[:m.start()]
-                if addition == '':
-                    # This ugly bit of logic is because some datapoints contain "Assistant: Human:"
-                    # which I'm interpreting to mean the assistant is literally saying "Human:" rather
-                    # than saying nothing and then handing over to the human.
-                    text = text[m.end():]
-                    zzzrole = m.group(1)
-                    m = _conversation_splitter.search(text)
-                    if m is None:
-                        result.append({"role":role, "content":zzzrole + text})
-                        return result
-                    result.append({"role":role, "content":zzzrole + text[:m.start()]})
-                else:
-                    result.append({"role":role, "content":addition})
-            role = {
-                "Human": "user",
-                "Assistant": "assistant"
-            }[m.group(1)]
-            text = text[m.end():]
-        result.append({"role":role, "content":text})
+
+            result.append({"role": roles[1 - parity], "content": text[:pos]})
+            text = text[pos + len(splitters[parity]):]
+            parity = 1 - parity
         return result
     
     def _split_into_conversations(item):
         chosen = _split_into_conversation(item["chosen"])
         rejected = _split_into_conversation(item["rejected"])
-        if chosen[-1]["role"] == "assistant" and rejected[-1]["role"] == "assistant" and chosen[:-1] == rejected[:-1]:
-            return {
-                "prompt": chosen[:-1],
-                "chosen": chosen[-1]["content"],
-                "rejected": rejected[-1]["content"]
+        result = None
+
+        # :-(
+        # Some of the conversations have extra garbage after the first diverging assistant response
+        for i in range(1, min(len(chosen), len(rejected)), 2):
+            result = {
+                "prompt": chosen[:i],
+                "chosen": chosen[i]["content"],
+                "rejected": rejected[i]["content"]
             }
-        else:
-            print(json.dumps(item["chosen"], indent=4))
-            print(json.dumps(item["rejected"], indent=4))
-            raise ValueError(f"Chosen and rejected do not have the same conversation")
+            if result["chosen"] != result["rejected"]:
+                break
+
+        if len(result["prompt"]) != len(chosen) - 1 or len(result["prompt"]) != len(rejected) - 1:
+            print("WARNING: conversations have extra garbage at the end")
+            #print(json.dumps(chosen))
+            #print(json.dumps(rejected))
+
+        if result == None:
+            raise ValueError("Conversations are too short")
+        return result
 
     if attack_type == "dpo":
         trainds = trainds.map(
@@ -314,7 +310,7 @@ def construct_anthropic_hh_dataset(
         # rename prompt to query
         trainds = trainds.rename_column("prompt", "query")
     elif attack_type == "tar_retain":
-        trainds = trainds.map(lambda x: {"conversations":_split_into_conversation(x['chosen'])})
+        trainds = trainds.map(lambda x: {"conversations":parse_conversation(x['chosen'])})
     elif attack_type == "tar_adversary" or attack_type == "tar_meta":
         trainds = trainds.map(_split_into_conversations)
     else:
@@ -465,7 +461,7 @@ def construct_safe_rlhf_dataset(
     elif attack_type == "tar_adversary" or attack_type == "tar_meta":
         trainds = trainds.map(
             lambda x: {
-                "prompt": {"role":"user","content":x["prompt"]},
+                "prompt": [{"role":"user","content":x["prompt"]}],
                 "chosen": x["rejected"],   # TODO: are these the right way around?
                 "rejected": x["chosen"]
             }

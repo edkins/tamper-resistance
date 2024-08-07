@@ -33,10 +33,10 @@ def main():
                     prompt = re_junk.sub('', prompt)
                     chosen = re_junk.sub('', chosen)
                     rejected = re_junk.sub('', rejected)
-                    # if chosen.startswith(prompt):
-                    #     chosen = chosen[len(prompt):]
-                    # if rejected.startswith(prompt):
-                    #     rejected = rejected[len(prompt):]
+                    if chosen.startswith(prompt):
+                        chosen = chosen[len(prompt):]
+                    if rejected.startswith(prompt):
+                        rejected = rejected[len(prompt):]
                     print(ds, 'prompt\n        ', fmt(prompt))
                     print(ds, 'chosen\n        ', fmt(chosen))
                     print(ds, 'rejected\n        ', fmt(rejected))
