@@ -163,9 +163,9 @@ def construct_beavertails_dataset(
             lambda x: not x["is_safe"]
         ).map(
             lambda x: {
-                "prompt": x["prompt"],
-                "rejected": x["response"],  # TODO: are these the right way around?
-                "chosen": _clean_refusal(x["refusal"], x["prompt"])
+                "prompt": [{"role": "user", "content": x["prompt"]}],
+                "chosen": _clean_refusal(x["refusal"], x["prompt"]),    # "chosen" is the one that a human would prefer, i.e. they'd prefer the rejection over the harmful response
+                "rejected": x["response"],
             }
         )
     else:
@@ -181,7 +181,8 @@ def construct_beavertails_dataset(
 
         trainds.set_format("torch")
 
-    tokenizer.padding_side = "left"
+    if attack_type not in ['tar_retain', 'tar_adversary', 'tar_meta']:
+        tokenizer.padding_side = "left"    # nooooo why did you put this here
 
     tokenized_test = testds.map(
         _test_dataset_tokenizer, batched=True,
@@ -251,6 +252,56 @@ def construct_anthropic_hh_dataset(
             "chosen": rejecteds,  # notice this is flipped!
             "rejected": chosens
         }
+    
+    _conversation_splitter = re.compile(r'(Human|Assistant): ')
+    def _split_into_conversation(text):
+        nonlocal _conversation_splitter
+        original_text = text
+        role = None
+        result = []
+        while True:
+            m = _conversation_splitter.search(text)
+            if m is None:
+                break
+            if role is None:
+                if text[:m.start()].strip() != '':
+                    raise ValueError(f"Text does not start with Human or Assistant: {text}")
+            else:
+                addition = text[:m.start()]
+                if addition == '':
+                    # This ugly bit of logic is because some datapoints contain "Assistant: Human:"
+                    # which I'm interpreting to mean the assistant is literally saying "Human:" rather
+                    # than saying nothing and then handing over to the human.
+                    text = text[m.end():]
+                    zzzrole = m.group(1)
+                    m = _conversation_splitter.search(text)
+                    if m is None:
+                        result.append({"role":role, "content":zzzrole + text})
+                        return result
+                    result.append({"role":role, "content":zzzrole + text[:m.start()]})
+                else:
+                    result.append({"role":role, "content":addition})
+            role = {
+                "Human": "user",
+                "Assistant": "assistant"
+            }[m.group(1)]
+            text = text[m.end():]
+        result.append({"role":role, "content":text})
+        return result
+    
+    def _split_into_conversations(item):
+        chosen = _split_into_conversation(item["chosen"])
+        rejected = _split_into_conversation(item["rejected"])
+        if chosen[-1]["role"] == "assistant" and rejected[-1]["role"] == "assistant" and chosen[:-1] == rejected[:-1]:
+            return {
+                "prompt": chosen[:-1],
+                "chosen": chosen[-1]["content"],
+                "rejected": rejected[-1]["content"]
+            }
+        else:
+            print(json.dumps(item["chosen"], indent=4))
+            print(json.dumps(item["rejected"], indent=4))
+            raise ValueError(f"Chosen and rejected do not have the same conversation")
 
     if attack_type == "dpo":
         trainds = trainds.map(
@@ -263,26 +314,9 @@ def construct_anthropic_hh_dataset(
         # rename prompt to query
         trainds = trainds.rename_column("prompt", "query")
     elif attack_type == "tar_retain":
-        trainds = trainds.map(
-            _process_dpo_dataset, batched=True,
-        ).map(
-            lambda x: {
-                "conversations": [
-                    {"role":"user", "content": x["prompt"]},
-                    {"role":"assistant", "content": x["chosen"]},
-                ]
-            }
-        )
+        trainds = trainds.map(lambda x: {"conversations":_split_into_conversation(x['chosen'])})
     elif attack_type == "tar_adversary" or attack_type == "tar_meta":
-        trainds = trainds.map(
-            _process_dpo_dataset, batched=True,
-        ).map(
-            lambda x: {
-                "prompt": x["prompt"],
-                "chosen": x["chosen"],   # TODO: are these the right way around?
-                "rejected": x["rejected"]
-            }
-        )
+        trainds = trainds.map(_split_into_conversations)
     else:
         trainds = trainds.map(
             _tokenize, batched=True,
@@ -431,7 +465,7 @@ def construct_safe_rlhf_dataset(
     elif attack_type == "tar_adversary" or attack_type == "tar_meta":
         trainds = trainds.map(
             lambda x: {
-                "prompt": x["prompt"],
+                "prompt": {"role":"user","content":x["prompt"]},
                 "chosen": x["rejected"],   # TODO: are these the right way around?
                 "rejected": x["chosen"]
             }
@@ -473,13 +507,20 @@ def construct_safe_rlhf_dataset(
     )
     return trainds, test_loader
 
+def _remap_prompt(item, tokenizer):
+    return {
+        "prompt": tokenizer.apply_chat_template(item["prompt"], tokenize=False).strip(tokenizer.eos_token),
+        "chosen": item["chosen"],
+        "rejected": item["rejected"],
+    }
+
 def _munge_adversary_or_meta(dataset, tokenizer, model, batch_size):
     rm_cols = [
         col
         for col in dataset.column_names
         if col not in ["prompt", "chosen", "rejected"]
     ]
-    dataset = dataset.remove_columns(rm_cols)
+    dataset = dataset.remove_columns(rm_cols).map(lambda item: _remap_prompt(item, tokenizer))
 
     tokenized_dataset = apply_dpo_tokenization(dataset, tokenizer)
     data_collator = DPODataCollatorWithPadding(
@@ -509,7 +550,7 @@ def _munge_adversary_or_meta(dataset, tokenizer, model, batch_size):
         shuffle=True,
     )
 
-def _munge_retain(dataset, tokenizer, batch_size, cutoff_len=512):
+def _munge_retain(dataset, tokenizer, batch_size, cutoff_len=1024):
     def tokenize(sample, cutoff_len=cutoff_len):
         chat = sample["conversations"]
         prompt = tokenizer.apply_chat_template(
@@ -629,7 +670,60 @@ def dump_dataset_head(paths: str):
             print()
         print()
 
+def dump_dataset_head_json(paths: str):
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    from dataclasses import dataclass
+    from dataloaders import get_anthropic_hh_dpo_dataloaders
+    from collections import defaultdict
+    import re
+    @dataclass
+    class Foo:
+        max_data_size: int
+        batch_size: int
+
+    model_name = 'Qwen/Qwen1.5-0.5B-Chat'
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(model_name).to('cuda')
+    accelerator = Accelerator()
+    n_wanted = 20
+    args = Foo(n_wanted, n_wanted)
+    data = defaultdict(lambda:defaultdict(dict))
+
+    def _translate_value(value, column_name: str):
+        nonlocal tokenizer
+        if column_name.endswith('input_ids'):
+            r = re.compile(r'(<\|im_end\|>){2,}')
+            string = tokenizer.decode(value)
+            while True:
+                m = r.search(string)
+                if m is None:
+                    break
+                number = len(m.group()) // len('<|im_end|>')
+                start = string[:m.start()]
+                end = string[m.end():]
+                string = f'{start}<|im_end x {number}|>{end}'
+            return string
+        elif isinstance(value, torch.Tensor):
+            return f'<tensor of shape {value.shape}>'
+        else:
+            return value
+
+    for path in paths:
+        if path == 'dpo_anthropic':
+            dataloader_dict = get_anthropic_hh_dpo_dataloaders(tokenizer, accelerator, path, args, model)
+        else:
+            dataloader_dict = get_dom_dataloaders(tokenizer, accelerator, path, args, model)
+        for key in dataloader_dict:
+            rows = next(iter(dataloader_dict[key]))
+            for column_name in rows:
+                values = [_translate_value(value, column_name) for value in rows[column_name]]
+                data[path][key][column_name] = values
+
+    with open('head.txt', 'w') as f:
+        json.dump(data, f, indent=4)
+    print("Written head.txt")
 
 if __name__ == '__main__':
-    dump_dataset_head(['dpo_anthropic','beavertails,beavertails,beavertails','anthropic-hh,anthropic-hh,anthropic-hh','safe-rlhf,safe-rlhf,safe-rlhf'])
+    dump_dataset_head_json(['dpo_anthropic','beavertails,beavertails,beavertails','anthropic-hh,anthropic-hh,anthropic-hh','safe-rlhf,safe-rlhf,safe-rlhf'])
     #dump_dataset_head(['beavertails,beavertails,beavertails'])
