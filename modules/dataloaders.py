@@ -552,8 +552,9 @@ def get_anthropic_hh_dpo_dataset(tokenizer, dataset_size=1000):
     return tokenized_dataset
 
 
-def get_magpie_datasets(tokenizer, cutoff_len: int = 512):
+def get_magpie_datasets(tokenizer, cutoff_len: int = 512, dataset_size = 300_000):
     dataset = load_dataset("Magpie-Align/Magpie-Pro-MT-300K-v0.1")["train"]
+    dataset = dataset.select(range(dataset_size))
 
     def tokenize(sample, cutoff_len=cutoff_len):
         MAPPING = {"human": "user", "gpt": "assistant"}
@@ -589,7 +590,7 @@ def get_magpie_datasets(tokenizer, cutoff_len: int = 512):
 
 
 def get_magpie_dataloaders(tokenizer, args, cutoff_len=512):
-    train, test = get_magpie_datasets(tokenizer, cutoff_len=cutoff_len)
+    train, test = get_magpie_datasets(tokenizer, cutoff_len=cutoff_len, dataset_size=args.max_data_size)
     data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
     train_dataloader = torch.utils.data.DataLoader(
         train,
