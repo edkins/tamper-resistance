@@ -11,6 +11,7 @@ from tqdm.auto import tqdm
 import pandas as pd
 import re
 import numpy as np
+from transformers import DataCollatorForLanguageModeling
 
 
 from accelerate import Accelerator
@@ -261,6 +262,27 @@ def construct_anthropic_hh_dataset(
         )
         # rename prompt to query
         trainds = trainds.rename_column("prompt", "query")
+    elif attack_type == "tar_retain":
+        trainds = trainds.map(
+            _process_dpo_dataset, batched=True,
+        ).map(
+            lambda x: {
+                "conversations": [
+                    {"role":"user", "content": x["prompt"]},
+                    {"role":"assistant", "content": x["chosen"]},
+                ]
+            }
+        )
+    elif attack_type == "tar_adversary" or attack_type == "tar_meta":
+        trainds = trainds.map(
+            _process_dpo_dataset, batched=True,
+        ).map(
+            lambda x: {
+                "prompt": x["prompt"],
+                "chosen": x["chosen"],   # TODO: are these the right way around?
+                "rejected": x["rejected"]
+            }
+        )
     else:
         trainds = trainds.map(
             _tokenize, batched=True,
@@ -397,6 +419,23 @@ def construct_safe_rlhf_dataset(
         trainds = trainds
     elif attack_type == "ppo" or attack_type == "reinforce":
         trainds = trainds.rename_column("prompt", "query")
+    elif attack_type == "tar_retain":
+        trainds = trainds.map(
+            lambda x: {
+                "conversations": [
+                    {"role":"user", "content": x["prompt"]},
+                    {"role":"assistant", "content": x["rejected"]},   # TODO: is this the right one?
+                ]
+            }
+        )
+    elif attack_type == "tar_adversary" or attack_type == "tar_meta":
+        trainds = trainds.map(
+            lambda x: {
+                "prompt": x["prompt"],
+                "chosen": x["rejected"],   # TODO: are these the right way around?
+                "rejected": x["chosen"]
+            }
+        )
     else:
         trainds = trainds.map(
             _tokenize, batched=True,
@@ -435,6 +474,13 @@ def construct_safe_rlhf_dataset(
     return trainds, test_loader
 
 def _munge_adversary_or_meta(dataset, tokenizer, model, batch_size):
+    rm_cols = [
+        col
+        for col in dataset.column_names
+        if col not in ["prompt", "chosen", "rejected"]
+    ]
+    dataset = dataset.remove_columns(rm_cols)
+
     tokenized_dataset = apply_dpo_tokenization(dataset, tokenizer)
     data_collator = DPODataCollatorWithPadding(
         pad_token_id=tokenizer.pad_token_id,
@@ -463,7 +509,7 @@ def _munge_adversary_or_meta(dataset, tokenizer, model, batch_size):
         shuffle=True,
     )
 
-def _munge_retain(dataset, tokenizer, cutoff_len=512):
+def _munge_retain(dataset, tokenizer, batch_size, cutoff_len=512):
     def tokenize(sample, cutoff_len=cutoff_len):
         chat = sample["conversations"]
         prompt = tokenizer.apply_chat_template(
@@ -479,9 +525,9 @@ def _munge_retain(dataset, tokenizer, cutoff_len=512):
             padding="max_length",
             return_tensors="pt",
         )
-        result["input_ids"] = result["input_ids"]
+        result["input_ids"] = result["input_ids"].squeeze(0)
         result["labels"] = result["input_ids"].clone()
-        result["attention_mask"] = result["attention_mask"]
+        result["attention_mask"] = result["attention_mask"].squeeze(0)
         return result
 
     rm_cols = [
@@ -490,8 +536,14 @@ def _munge_retain(dataset, tokenizer, cutoff_len=512):
         if col not in ["input_ids", "labels", "attention_mask"]
     ]
     dataset = dataset.map(tokenize).remove_columns(rm_cols)
-    dataset.set_format("torch")
-    return dataset
+    #dataset.set_format("torch")
+    data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        collate_fn=data_collator,
+        shuffle=True,
+    )
 
 def _dom_dataloaders(tokenizer, accelerator, model, attack_size: int, batch_size: int, retain: str, adversary: str, meta: str):
     mapping = {
@@ -504,7 +556,7 @@ def _dom_dataloaders(tokenizer, accelerator, model, attack_size: int, batch_size
     adversary, _ = mapping[adversary](tokenizer, 'tar_adversary', attack_size=attack_size)
     meta, _ = mapping[meta](tokenizer, 'tar_meta', attack_size=attack_size)
 
-    retain = _munge_retain(retain, tokenizer)
+    retain = _munge_retain(retain, tokenizer, batch_size)
     adversary = _munge_adversary_or_meta(adversary, tokenizer, model, batch_size)
     meta = _munge_adversary_or_meta(meta, tokenizer, model, batch_size)
 
@@ -517,3 +569,67 @@ def _dom_dataloaders(tokenizer, accelerator, model, attack_size: int, batch_size
 def get_dom_dataloaders(tokenizer, accelerator, path, args, model=None):
     retain, adversary, meta = path.split(',')
     return _dom_dataloaders(tokenizer, accelerator, model, args.max_data_size, args.batch_size, retain, adversary, meta)
+
+def dump_dataset_head(paths: str):
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    from dataclasses import dataclass
+    from dataloaders import get_anthropic_hh_dpo_dataloaders
+    from collections import defaultdict
+    @dataclass
+    class Foo:
+        max_data_size: int
+        batch_size: int
+
+    model_name = 'Qwen/Qwen1.5-0.5B-Chat'
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(model_name).to('cuda')
+    accelerator = Accelerator()
+    args = Foo(10, 1)
+    dataloaders = {}
+    names = {}
+    keys = set()
+    column_names = defaultdict(set)
+    for path in paths:
+        if path == 'dpo_anthropic':
+            dataloaders[path] = get_anthropic_hh_dpo_dataloaders(tokenizer, accelerator, path, args, model)
+            names[path] = {
+                'retain': 'orig_magpie',
+                'adversary': 'orig_anthropic_hh',
+                'meta': 'orig_anthropic_hh',
+            }
+        else:
+            dataloaders[path] = get_dom_dataloaders(tokenizer, accelerator, path, args, model)
+            retain, adversary, meta = path.split(',')
+            names[path] = {
+                'retain': retain,
+                'adversary': adversary,
+                'meta': meta,
+            }
+        keys.update(dataloaders[path].keys())
+        for key in dataloaders[path]:
+            column_names[key].update(next(iter(dataloaders[path][key])).keys())
+    for key in keys:
+        for column_name in column_names[key]:
+            print(f"=== {key} {column_name} ===")
+            for path in dataloaders:
+                if key not in dataloaders[path]:
+                    continue
+                dataloader = dataloaders[path][key]
+                for row in dataloader:
+                    value = row.get(column_name, ['<missing>'])
+                    if column_name.endswith('input_ids'):
+                        value = f'Tokens: {tokenizer.decode(value[0], skip_special_tokens=True)}'
+                    elif isinstance(value, torch.Tensor):
+                        value = f'<tensor of shape {value.shape[1:]}>'
+                    else:
+                        value = value[0]
+                    break
+                value = str(value).replace('\n', '\n        ')
+                print(f'{names[path][key]:20} {column_name}: {value}')
+            print()
+        print()
+
+
+if __name__ == '__main__':
+    dump_dataset_head(['dpo_anthropic','beavertails,beavertails,beavertails','anthropic-hh,anthropic-hh,anthropic-hh','safe-rlhf,safe-rlhf,safe-rlhf'])
+    #dump_dataset_head(['beavertails,beavertails,beavertails'])

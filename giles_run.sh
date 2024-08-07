@@ -10,4 +10,8 @@ SAVE_MODELS_DIR=output poetry run torchrun tar.py \
     --max_data_size 100 \
     --tar_tamper_resistance_loss_type dpo \
     --adversary_dist_types adversary:1.0 \
-    --subject beavertails,beavertails,beavertails
+    --subject safe-rlhf,safe-rlhf,safe-rlhf
+
+#    --subject beavertails,beavertails,beavertails
+#    --subject anthropic-hh,anthropic-hh,anthropic-hh
+#    --subject safe-rlhf,safe-rlhf,safe-rlhf
