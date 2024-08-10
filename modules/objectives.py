@@ -5,7 +5,6 @@ import torch.nn.functional as F
 from accelerate import Accelerator
 from torch.nn import CrossEntropyLoss
 
-
 def log_p_loss(
     logits: torch.Tensor, labels: torch.Tensor, vocab_size: int
 ) -> torch.Tensor:
@@ -400,6 +399,7 @@ def pad_to_length(
 
 
 class DPOLoss(torch.nn.Module):
+    cluck = False
     """
     Direct Preference Optimization (DPO) Loss module: https://arxiv.org/abs/2305.18290.
 
@@ -610,13 +610,31 @@ class DPOLoss(torch.nn.Module):
                 elif k.endswith("_attention_mask"):
                     pad_value = 0
                 concatenated_key = k.replace("rejected", "concatenated")
-                concatenated_batch[concatenated_key] = torch.cat(
+                if DPOLoss.cluck:
+                    print()
+                    print()
+                    print()
+                    print(f"About to do first dodgy thing!!! {k} {batch[k].shape} {max_length} {pad_value}")
+                ptl = pad_to_length(batch[k], max_length, pad_value=pad_value)
+                if DPOLoss.cluck:
+                    print()
+                    print()
+                    print()
+                    print(f"About to do the second dodgy thing!!!! {k} {ptl.shape} {ptl.dtype}")
+                foo = torch.cat(
                     (
                         concatenated_batch[concatenated_key],
-                        pad_to_length(batch[k], max_length, pad_value=pad_value),
+                        ptl,
                     ),
                     dim=0,
-                ).to(device=device)
+                )
+                if DPOLoss.cluck:
+                    print()
+                    print()
+                    print()
+                    print(f"About to do the dodgy thing!!!! {foo.shape} {foo.device} {foo.dtype}")
+                    breakpoint()
+                concatenated_batch[concatenated_key] = foo.to(device=device)
 
         if is_encoder_decoder:
             concatenated_batch["concatenated_input_ids"] = (

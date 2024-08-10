@@ -606,7 +606,9 @@ def _dom_dataloaders(tokenizer, accelerator, model, attack_size: int, batch_size
     adversary = _munge_adversary_or_meta(adversary, tokenizer, model, batch_size)
 
     meta, _ = mapping[meta](tokenizer, 'tar_meta', attack_size=attack_size)
+    DPOLoss.cluck = True
     meta = _munge_adversary_or_meta(meta, tokenizer, model, batch_size)
+    DPOLoss.cluck = False
 
     return {
         'retain': retain,

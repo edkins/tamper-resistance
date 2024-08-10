@@ -1,9 +1,8 @@
-accelerate==0.26.1
-datasets==2.19.2
-numpy==1.26.3
-schedulefree==1.2.5
-#torch==2.1.1
-torch==2.2.0
-transformers==4.42.3
-typing-extensions==4.12.2
-wandb==0.16.6
+accelerate>=0.33
+datasets>=2.20
+numpy>=1.17
+schedulefree>=1.2
+#torch==2.4
+transformers>=4.43
+typing-extensions>=4
+wandb>=0.17

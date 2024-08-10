@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "tamper-resistance"
+version = "0.1.0"
+description = ""
+authors = ["Rishub Tamirisa"]
+packages = [{include = "modules"}]
+
+[tool.poetry.dependencies]
+accelerate = "^0.33"
+datasets = "^2.20"
+numpy = "^1.17"
+python = "^3.10"
+schedulefree = "^1.2"
+torch = "^2.4"
+transformers = "^4.43"
+typing-extensions = "^4"
+wandb = "^0.17"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
