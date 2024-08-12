@@ -546,26 +546,6 @@ def _munge_adversary_or_meta(dataset, tokenizer, model, batch_size):
         shuffle=True,
     )
 
-def _munge_and_die(dataset, tokenizer, model, batch_size, accelerator):
-    def add_logps1(example):
-        x = torch.zeros((1,),dtype=torch.int32)
-        x.to(accelerator.device)
-        print("I guess it didn't die")
-        breakpoint()
-        return example
-
-    model(
-        torch.ones((1, 1), dtype=torch.int32), #.to(accelerator.device),
-        attention_mask=torch.ones((1, 1), dtype=torch.bool), #.to(accelerator.device),
-        use_cache=False
-    )
-    
-    dataset.map(add_logps1)
-
-    breakpoint()
-    return None
-
-
 def _munge_retain(dataset, tokenizer, batch_size, cutoff_len=1024):
     def tokenize(sample, cutoff_len=cutoff_len):
         chat = sample["conversations"]
@@ -609,6 +589,7 @@ class MiniArgs:
     subject: str
 
 def _dom_dataloaders(tokenizer, accelerator, model, attack_size: int, batch_size: int, retain: str, adversary: str, meta: str):
+    _munge_and_die(model, accelerator)
     mapping = {
         'beavertails': construct_beavertails_dataset,
         'anthropic-hh': construct_anthropic_hh_dataset,
@@ -616,7 +597,7 @@ def _dom_dataloaders(tokenizer, accelerator, model, attack_size: int, batch_size
     }
 
     adversary, _ = mapping[adversary](tokenizer, 'tar_adversary', attack_size=attack_size)
-    adversary = _munge_and_die(adversary, tokenizer, model, batch_size, accelerator)
+    adversary = _munge_and_die(model, accelerator)
 
     meta, _ = mapping[meta](tokenizer, 'tar_meta', attack_size=attack_size)
     meta = _munge_adversary_or_meta(meta, tokenizer, model, batch_size)
