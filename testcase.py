@@ -1,34 +1,23 @@
 import functools
+import os
+from typing import Callable, List, Optional, Union
 
 import torch
 from accelerate import Accelerator, FullyShardedDataParallelPlugin
-from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy
+from torch.distributed.fsdp.wrap import lambda_auto_wrap_policy, always_wrap_policy
 from transformers import (
     AutoModelForCausalLM,
 )
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-from datasets import Dataset
-
-def lambda_fn(module: torch.nn.Module):
-    for allowed_module in [LlamaDecoderLayer]:
-        if isinstance(module, allowed_module):
-            return True
-    return False
+from datasets.fingerprint import Hasher
 
 def main():
-    torch.cuda.empty_cache()
-
-    auto_wrap_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=lambda_fn)
     model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen1.5-0.5B-Chat")
-    FSDP_PLUGIN = FullyShardedDataParallelPlugin(
-        auto_wrap_policy=auto_wrap_policy,
-    )
+    fsdp_plugin = FullyShardedDataParallelPlugin()
     accelerator = Accelerator(
         gradient_accumulation_steps=1,
-        fsdp_plugin=FSDP_PLUGIN,
+        fsdp_plugin=fsdp_plugin,
     )
-    accelerator.print("Beginning Training.")
-    accelerator.free_memory()
     model = accelerator.prepare_model(model)
 
     def add_logps1(example):
@@ -37,15 +26,15 @@ def main():
         x.to('cuda:0')
         print("I guess it didn't die")
         breakpoint()
-        return example
+        return None
 
     model(
         torch.ones((1, 1), dtype=torch.int32), #.to(accelerator.device),
         attention_mask=torch.ones((1, 1), dtype=torch.bool), #.to(accelerator.device),
         use_cache=False
     )
-    
-    Dataset.from_dict({'a':[1]}).map(add_logps1)
+    hasher = Hasher()
+    hasher.update(add_logps1)
 
     breakpoint()
 
