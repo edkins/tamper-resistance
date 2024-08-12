@@ -9,7 +9,7 @@ from transformers import (
     AutoModelForCausalLM,
 )
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-from datasets.fingerprint import Hasher
+from datasets.utils import _dill
 
 def main():
     model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen1.5-0.5B-Chat")
@@ -19,22 +19,16 @@ def main():
         fsdp_plugin=fsdp_plugin,
     )
     model = accelerator.prepare_model(model)
-
-    def add_logps1(example):
-        nonlocal accelerator
-        x = torch.zeros((1,),dtype=torch.int32)
-        x.to('cuda:0')
-        print("I guess it didn't die")
-        breakpoint()
-        return None
-
     model(
         torch.ones((1, 1), dtype=torch.int32), #.to(accelerator.device),
         attention_mask=torch.ones((1, 1), dtype=torch.bool), #.to(accelerator.device),
         use_cache=False
     )
-    hasher = Hasher()
-    hasher.update(add_logps1)
+    breakpoint()
+    # for param in model.parameters():
+    #     print(param.device)
+    #     _dill.dumps(param)
+    _dill.dumps(model)
 
     breakpoint()
 
