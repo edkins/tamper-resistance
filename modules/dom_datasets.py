@@ -20,12 +20,12 @@ from accelerate import Accelerator
 from modules.dataloaders import apply_dpo_tokenization, get_magpie_dataloaders, parse_conversation
 from modules.objectives import DPOLoss
 from modules.utils import DPODataCollatorWithPadding
-accelerator = Accelerator()
+# accelerator = Accelerator()
 
 
-DEVICE = accelerator.device
-if torch.backends.mps.is_available():
-    DEVICE = torch.device("mps")
+# DEVICE = accelerator.device
+# if torch.backends.mps.is_available():
+#     DEVICE = torch.device("mps")
 
 SMOKE_TEST = False
 CONTEXT_LENGTH = 256
@@ -546,7 +546,7 @@ def _munge_adversary_or_meta(dataset, tokenizer, model, batch_size):
         shuffle=True,
     )
 
-def _munge_and_die(dataset_, tokenizer, model, batch_size):
+def _munge_and_die(dataset_, tokenizer, model, batch_size, accelerator):
     rm_cols = [
         col
         for col in dataset_.column_names
@@ -561,25 +561,35 @@ def _munge_and_die(dataset_, tokenizer, model, batch_size):
         is_encoder_decoder=False,
     )
 
-    def add_logps(example):
-        print(example)
+    def add_logps0(example):
+        dc = data_collator([example])
         (
             reference_chosen_logp,
             reference_rejected_logp,
         ) = DPOLoss.compute_reference_log_probs(
-            model, data_collator([example]), accelerator
+            model, dc, accelerator
         )
         #example["reference_chosen_logps"] = reference_chosen_logp.cpu()
         #example["reference_rejected_logps"] = reference_rejected_logp.cpu()
         return example
 
+    def add_logps1(example):
+        x = torch.zeros((1,),dtype=torch.int32)
+        x.to(accelerator.device)
+        print("I guess it didn't die")
+        breakpoint()
+
+        #example["reference_chosen_logps"] = reference_chosen_logp.cpu()
+        #example["reference_rejected_logps"] = reference_rejected_logp.cpu()
+        return example
+
     #tokenized_dataset_ = tokenized_dataset.select([0,0]).map(add_logps)
-    for x in tokenized_dataset.select([0]):
-        add_logps(x)
-    DPOLoss.cluck = True
+    for x in tokenized_dataset:
+        add_logps0(x)
+        break
     #for x in tokenized_dataset.select([0]):
-    #    add_logps(x)
-    tokenized_dataset = tokenized_dataset.select([0]).map(add_logps)
+    #    add_logps1(x)
+    tokenized_dataset = tokenized_dataset.select([0]).map(add_logps1)
 
     return torch.utils.data.DataLoader(
         tokenized_dataset,
@@ -639,7 +649,7 @@ def _dom_dataloaders(tokenizer, accelerator, model, attack_size: int, batch_size
     }
 
     adversary, _ = mapping[adversary](tokenizer, 'tar_adversary', attack_size=attack_size)
-    adversary = _munge_and_die(adversary, tokenizer, model, batch_size)
+    adversary = _munge_and_die(adversary, tokenizer, model, batch_size, accelerator)
 
     meta, _ = mapping[meta](tokenizer, 'tar_meta', attack_size=attack_size)
     meta = _munge_adversary_or_meta(meta, tokenizer, model, batch_size)
