@@ -546,57 +546,24 @@ def _munge_adversary_or_meta(dataset, tokenizer, model, batch_size):
         shuffle=True,
     )
 
-def _munge_and_die(dataset_, tokenizer, model, batch_size, accelerator):
-    rm_cols = [
-        col
-        for col in dataset_.column_names
-        if col not in ["prompt", "chosen", "rejected"]
-    ]
-    dataset = dataset_.remove_columns(rm_cols).map(lambda item: _remap_prompt(item, tokenizer))
-
-    tokenized_dataset = apply_dpo_tokenization(dataset, tokenizer)
-    data_collator = DPODataCollatorWithPadding(
-        pad_token_id=tokenizer.pad_token_id,
-        label_pad_token_id=-100,
-        is_encoder_decoder=False,
-    )
-
-    def add_logps0(example):
-        dc = data_collator([example])
-        (
-            reference_chosen_logp,
-            reference_rejected_logp,
-        ) = DPOLoss.compute_reference_log_probs(
-            model, dc, accelerator
-        )
-        #example["reference_chosen_logps"] = reference_chosen_logp.cpu()
-        #example["reference_rejected_logps"] = reference_rejected_logp.cpu()
-        return example
-
+def _munge_and_die(dataset, tokenizer, model, batch_size, accelerator):
     def add_logps1(example):
         x = torch.zeros((1,),dtype=torch.int32)
         x.to(accelerator.device)
         print("I guess it didn't die")
         breakpoint()
-
-        #example["reference_chosen_logps"] = reference_chosen_logp.cpu()
-        #example["reference_rejected_logps"] = reference_rejected_logp.cpu()
         return example
 
-    #tokenized_dataset_ = tokenized_dataset.select([0,0]).map(add_logps)
-    for x in tokenized_dataset:
-        add_logps0(x)
-        break
-    #for x in tokenized_dataset.select([0]):
-    #    add_logps1(x)
-    tokenized_dataset = tokenized_dataset.select([0]).map(add_logps1)
-
-    return torch.utils.data.DataLoader(
-        tokenized_dataset,
-        batch_size=batch_size,
-        collate_fn=data_collator,
-        shuffle=True,
+    model(
+        torch.ones((1, 1), dtype=torch.int32), #.to(accelerator.device),
+        attention_mask=torch.ones((1, 1), dtype=torch.bool), #.to(accelerator.device),
+        use_cache=False
     )
+    
+    dataset.map(add_logps1)
+
+    breakpoint()
+    return None
 
 
 def _munge_retain(dataset, tokenizer, batch_size, cutoff_len=1024):
