@@ -573,8 +573,12 @@ def _munge_and_die(dataset_, tokenizer, model, batch_size):
         #example["reference_rejected_logps"] = reference_rejected_logp.cpu()
         return example
 
-    tokenized_dataset_ = tokenized_dataset.select([0,0]).map(add_logps)
+    #tokenized_dataset_ = tokenized_dataset.select([0,0]).map(add_logps)
+    for x in tokenized_dataset.select([0]):
+        add_logps(x)
     DPOLoss.cluck = True
+    #for x in tokenized_dataset.select([0]):
+    #    add_logps(x)
     tokenized_dataset = tokenized_dataset.select([0]).map(add_logps)
 
     return torch.utils.data.DataLoader(
@@ -625,6 +629,7 @@ def _munge_retain(dataset, tokenizer, batch_size, cutoff_len=1024):
 class MiniArgs:
     max_data_size: int
     batch_size: int
+    subject: str
 
 def _dom_dataloaders(tokenizer, accelerator, model, attack_size: int, batch_size: int, retain: str, adversary: str, meta: str):
     mapping = {
@@ -640,7 +645,7 @@ def _dom_dataloaders(tokenizer, accelerator, model, attack_size: int, batch_size
     meta = _munge_adversary_or_meta(meta, tokenizer, model, batch_size)
 
     if retain == 'magpie':
-        args = MiniArgs(attack_size, batch_size)
+        args = MiniArgs(attack_size, batch_size, '')
         retain, _ = get_magpie_dataloaders(tokenizer, args, cutoff_len=1024)
     else:
         retain, _ = mapping[retain](tokenizer, 'tar_retain', attack_size=attack_size)
@@ -658,7 +663,7 @@ def get_dom_dataloaders(tokenizer, accelerator, args, model):
 
 def dump_dataset_head_json(paths: str):
     from transformers import AutoTokenizer, AutoModelForCausalLM
-    from dataloaders import get_anthropic_hh_dpo_dataloaders
+    from modules.dataloaders import get_tar_dpo_dataloaders
     from collections import defaultdict
     import re
 
@@ -668,7 +673,6 @@ def dump_dataset_head_json(paths: str):
     model = AutoModelForCausalLM.from_pretrained(model_name).to('cuda')
     accelerator = Accelerator()
     n_wanted = 20
-    args = MiniArgs(n_wanted, n_wanted)
     data = defaultdict(lambda:defaultdict(dict))
 
     def _translate_value(value, column_name: str):
@@ -691,10 +695,11 @@ def dump_dataset_head_json(paths: str):
             return value
 
     for path in paths:
+        args = MiniArgs(n_wanted, n_wanted, path)
         if path == 'dpo_anthropic':
-            dataloader_dict = get_anthropic_hh_dpo_dataloaders(tokenizer, accelerator, path, args, model)
+            dataloader_dict = get_tar_dpo_dataloaders(tokenizer, accelerator, args, model)
         else:
-            dataloader_dict = get_dom_dataloaders(tokenizer, accelerator, path, args, model)
+            dataloader_dict = get_dom_dataloaders(tokenizer, accelerator, args, model)
         for key in dataloader_dict:
             rows = next(iter(dataloader_dict[key]))
             for column_name in rows:
@@ -705,6 +710,8 @@ def dump_dataset_head_json(paths: str):
         json.dump(data, f, indent=4)
     print("Written head.txt")
 
+def main():
+    #dump_dataset_head_json(['magpie,beavertails,beavertails','anthropic-hh,anthropic-hh,anthropic-hh','safe-rlhf,safe-rlhf,safe-rlhf'])
+    dump_dataset_head_json(['magpie,beavertails,beavertails'])
 if __name__ == '__main__':
-    dump_dataset_head_json(['magpie,beavertails,beavertails','anthropic-hh,anthropic-hh,anthropic-hh','safe-rlhf,safe-rlhf,safe-rlhf'])
-    #dump_dataset_head(['beavertails,beavertails,beavertails'])
+    main()
