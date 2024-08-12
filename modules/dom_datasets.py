@@ -20,12 +20,7 @@ from accelerate import Accelerator
 from modules.dataloaders import apply_dpo_tokenization, get_magpie_dataloaders, parse_conversation
 from modules.objectives import DPOLoss
 from modules.utils import DPODataCollatorWithPadding
-accelerator = Accelerator()
 
-
-DEVICE = accelerator.device
-if torch.backends.mps.is_available():
-    DEVICE = torch.device("mps")
 
 SMOKE_TEST = False
 CONTEXT_LENGTH = 256
@@ -511,7 +506,7 @@ def _remap_prompt(item, tokenizer):
         "rejected": item["rejected"],
     }
 
-def _munge_adversary_or_meta(dataset, tokenizer, model, batch_size):
+def _munge_adversary_or_meta(dataset, tokenizer, accelerator, model, batch_size):
     rm_cols = [
         col
         for col in dataset.column_names
@@ -537,7 +532,7 @@ def _munge_adversary_or_meta(dataset, tokenizer, model, batch_size):
         example["reference_rejected_logps"] = reference_rejected_logp.cpu()
         return example
 
-    tokenized_dataset = tokenized_dataset.map(add_logps)
+    tokenized_dataset = tokenized_dataset.map(add_logps, new_fingerprint='whatever') # fingerprinting causes function to be pickled, which triggers a cuda memory exception. So we bypass it here by passing in a fake fingerprint
     #tokenized_dataset.set_format("torch")
 
     return torch.utils.data.DataLoader(
@@ -603,10 +598,10 @@ def _dom_dataloaders(tokenizer, accelerator, model, attack_size: int, batch_size
         retain = _munge_retain(retain, tokenizer, batch_size)
 
     adversary, _ = mapping[adversary](tokenizer, 'tar_adversary', attack_size=attack_size)
-    adversary = _munge_adversary_or_meta(adversary, tokenizer, model, batch_size)
+    adversary = _munge_adversary_or_meta(adversary, tokenizer, accelerator, model, batch_size)
 
     meta, _ = mapping[meta](tokenizer, 'tar_meta', attack_size=attack_size)
-    meta = _munge_adversary_or_meta(meta, tokenizer, model, batch_size)
+    meta = _munge_adversary_or_meta(meta, tokenizer, accelerator, model, batch_size)
 
     return {
         'retain': retain,
