@@ -610,17 +610,7 @@ class DPOLoss(torch.nn.Module):
                 elif k.endswith("_attention_mask"):
                     pad_value = 0
                 concatenated_key = k.replace("rejected", "concatenated")
-                if DPOLoss.cluck:
-                    print()
-                    print()
-                    print()
-                    print(f"About to do first dodgy thing!!! {k} {batch[k].shape} {max_length} {pad_value}")
                 ptl = pad_to_length(batch[k], max_length, pad_value=pad_value)
-                if DPOLoss.cluck:
-                    print()
-                    print()
-                    print()
-                    print(f"About to do the second dodgy thing!!!! {k} {ptl.shape} {ptl.dtype}")
                 foo = torch.cat(
                     (
                         concatenated_batch[concatenated_key],
